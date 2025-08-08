@@ -239,10 +239,20 @@ class GeminiLlmConnection(BaseLlmConnection):
             for function_call in message.tool_call.function_calls
         ]
         yield LlmResponse(
-            content=types.Content(role='model', parts=parts),
+            content=types.Content(role='model', parts=parts)
             usage_metadata=self._fix_usage_metadata(
                 getattr(message, 'usage_metadata', None)
             ),
+        )
+      if message.session_resumption_update:
+        logger.info('Redeived session reassumption message: %s', message)
+        yield (
+            LlmResponse(
+                live_session_resumption_update=message.session_resumption_update
+                usage_metadata=self._fix_usage_metadata(
+                    getattr(message, 'usage_metadata', None)
+                ),
+            )
         )
 
   def _fix_usage_metadata(self, usage_metadata):
