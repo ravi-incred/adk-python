@@ -12,24 +12,4 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Parallel agent implementation."""
-
-from __future__ import annotations
-
-from typing import Literal
-
-from pydantic import ConfigDict
-
-from ..utils.feature_decorator import experimental
-from .base_agent_config import BaseAgentConfig
-
-
-@experimental
-class ParallelAgentConfig(BaseAgentConfig):
-  """The config for the YAML schema of a ParallelAgent."""
-
-  model_config = ConfigDict(
-      extra='forbid',
-  )
-
-  agent_class: Literal['ParallelAgent'] = 'ParallelAgent'
+from . import agent

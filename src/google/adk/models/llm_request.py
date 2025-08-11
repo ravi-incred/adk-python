@@ -25,7 +25,7 @@ from ..tools.base_tool import BaseTool
 
 
 def _find_tool_with_function_declarations(
-    llm_request: 'LlmRequest',
+    llm_request: LlmRequest,
 ) -> Optional[types.Tool]:
   """Find an existing Tool with function_declarations in the LlmRequest."""
   # TODO: add individual tool with declaration and merge in google_llm.py
