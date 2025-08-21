@@ -206,6 +206,17 @@ def _set_llm_span_attributes(
       _safe_json_serialize(_build_llm_request_for_trace(llm_request)),
   )
   # Consider removing once GenAI SDK provides a way to record this info.
+  if llm_request.config:
+    if llm_request.config.top_p:
+      span.set_attribute(
+          'gen_ai.request.top_p',
+          llm_request.config.top_p,
+      )
+    if llm_request.config.max_output_tokens:
+      span.set_attribute(
+          'gen_ai.request.max_tokens',
+          llm_request.config.max_output_tokens,
+      )
 
   try:
     llm_response_json = llm_response.model_dump_json(exclude_none=True)
@@ -228,6 +239,11 @@ def _set_llm_span_attributes(
           'gen_ai.usage.output_tokens',
           llm_response.usage_metadata.candidates_token_count,
       )
+  if llm_response.finish_reason:
+    span.set_attribute(
+        'gen_ai.response.finish_reasons',
+        [llm_response.finish_reason.value.lower()],
+    )
 
 
 def trace_send_data(
