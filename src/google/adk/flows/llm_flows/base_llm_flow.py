@@ -416,8 +416,6 @@ class BaseLlmFlow(ABC):
     from ...agents.llm_agent import LlmAgent
 
     agent = invocation_context.agent
-    if not isinstance(agent, LlmAgent):
-      return
 
     # Runs processors.
     for processor in self.request_processors:
@@ -766,8 +764,6 @@ class BaseLlmFlow(ABC):
     from ...agents.llm_agent import LlmAgent
 
     agent = invocation_context.agent
-    if not isinstance(agent, LlmAgent):
-      return
 
     callback_context = CallbackContext(
         invocation_context, event_actions=model_response_event.actions
@@ -805,8 +801,6 @@ class BaseLlmFlow(ABC):
     from ...agents.llm_agent import LlmAgent
 
     agent = invocation_context.agent
-    if not isinstance(agent, LlmAgent):
-      return
 
     callback_context = CallbackContext(
         invocation_context, event_actions=model_response_event.actions
