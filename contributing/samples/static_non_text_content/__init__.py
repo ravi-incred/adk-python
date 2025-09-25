@@ -12,16 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from __future__ import annotations
+"""Static non-text content sample agent package."""
 
-import pydantic
-from pydantic import alias_generators
-
-
-class EvalBaseModel(pydantic.BaseModel):
-  model_config = pydantic.ConfigDict(
-      alias_generator=alias_generators.to_camel,
-      populate_by_name=True,
-      extra='forbid',
-      arbitrary_types_allowed=True,
-  )
+from . import agent
