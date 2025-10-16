@@ -21,12 +21,14 @@ from typing import Any
 from typing import AsyncGenerator
 from typing import Awaitable
 from typing import Callable
+from typing import cast
 from typing import ClassVar
 from typing import Dict
 from typing import Literal
 from typing import Optional
 from typing import Type
 from typing import Union
+import warnings
 
 from google.genai import types
 from pydantic import BaseModel
@@ -111,8 +113,44 @@ ToolUnion: TypeAlias = Union[Callable, BaseTool, BaseToolset]
 
 
 async def _convert_tool_union_to_tools(
-    tool_union: ToolUnion, ctx: ReadonlyContext
+    tool_union: ToolUnion,
+    ctx: ReadonlyContext,
+    model: Union[str, BaseLlm],
+    multiple_tools: bool = False,
 ) -> list[BaseTool]:
+  from ..tools.google_search_tool import GoogleSearchTool
+  from ..tools.vertex_ai_search_tool import VertexAiSearchTool
+
+  # Wrap google_search tool with AgentTool if there are multiple tools because
+  # the built-in tools cannot be used together with other tools.
+  # TODO(b/448114567): Remove once the workaround is no longer needed.
+  if multiple_tools and isinstance(tool_union, GoogleSearchTool):
+    from ..tools.google_search_agent_tool import create_google_search_agent
+    from ..tools.google_search_agent_tool import GoogleSearchAgentTool
+
+    search_tool = cast(GoogleSearchTool, tool_union)
+    if search_tool.bypass_multi_tools_limit:
+      return [GoogleSearchAgentTool(create_google_search_agent(model))]
+
+  # Replace VertexAiSearchTool with DiscoveryEngineSearchTool if there are
+  # multiple tools because the built-in tools cannot be used together with
+  # other tools.
+  # TODO(b/448114567): Remove once the workaround is no longer needed.
+  if multiple_tools and isinstance(tool_union, VertexAiSearchTool):
+    from ..tools.discovery_engine_search_tool import DiscoveryEngineSearchTool
+
+    vais_tool = cast(VertexAiSearchTool, tool_union)
+    if vais_tool.bypass_multi_tools_limit:
+      return [
+          DiscoveryEngineSearchTool(
+              data_store_id=vais_tool.data_store_id,
+              data_store_specs=vais_tool.data_store_specs,
+              search_engine_id=vais_tool.search_engine_id,
+              filter=vais_tool.filter,
+              max_results=vais_tool.max_results,
+          )
+      ]
+
   if isinstance(tool_union, BaseTool):
     return [tool_union]
   if callable(tool_union):
@@ -151,13 +189,17 @@ class LlmAgent(BaseAgent):
   global_instruction: Union[str, InstructionProvider] = ''
   """Instructions for all the agents in the entire agent tree.
 
+  DEPRECATED: This field is deprecated and will be removed in a future version.
+  Use GlobalInstructionPlugin instead, which provides the same functionality
+  at the App level. See migration guide for details.
+
   ONLY the global_instruction in root agent will take effect.
 
   For example: use global_instruction to make all agents have a stable identity
   or personality.
   """
 
-  static_instruction: Optional[types.Content] = None
+  static_instruction: Optional[types.ContentUnion] = None
   """Static instruction content sent literally as system instruction at the beginning.
 
   This field is for content that never changes and doesn't contain placeholders.
@@ -184,11 +226,20 @@ class LlmAgent(BaseAgent):
   For explicit caching control, configure context_cache_config at App level.
 
   **Content Support:**
-  Can contain text, files, binaries, or any combination as types.Content
-  supports multiple part types (text, inline_data, file_data, etc.).
+  Accepts types.ContentUnion which includes:
+  - str: Simple text instruction
+  - types.Content: Rich content object
+  - types.Part: Single part (text, inline_data, file_data, etc.)
+  - PIL.Image.Image: Image object
+  - types.File: File reference
+  - list[PartUnion]: List of parts
 
-  **Example:**
+  **Examples:**
   ```python
+  # Simple string instruction
+  static_instruction = "You are a helpful assistant."
+
+  # Rich content with files
   static_instruction = types.Content(
       role='user',
       parts=[
@@ -349,7 +400,8 @@ class LlmAgent(BaseAgent):
         async for event in agen:
           yield event
 
-      yield self._create_agent_state_event(ctx, end_of_agent=True)
+      ctx.set_agent_state(self.name, end_of_agent=True)
+      yield self._create_agent_state_event(ctx)
       return
 
     async with Aclosing(self._llm_flow.run_async(ctx)) as agen:
@@ -360,7 +412,13 @@ class LlmAgent(BaseAgent):
           return
 
     if ctx.is_resumable:
-      yield self._create_agent_state_event(ctx, end_of_agent=True)
+      events = ctx._get_events(current_invocation=True, current_branch=True)
+      if events and ctx.should_pause_invocation(events[-1]):
+        return
+      # Only yield an end state if the last event is no longer a long running
+      # tool call.
+      ctx.set_agent_state(self.name, end_of_agent=True)
+      yield self._create_agent_state_event(ctx)
 
   @override
   async def _run_live_impl(
@@ -431,6 +489,16 @@ class LlmAgent(BaseAgent):
       bypass_state_injection: Whether the instruction is based on
       InstructionProvider.
     """
+    # Issue deprecation warning if global_instruction is being used
+    if self.global_instruction:
+      warnings.warn(
+          'global_instruction field is deprecated and will be removed in a'
+          ' future version. Use GlobalInstructionPlugin instead for the same'
+          ' functionality at the App level. See migration guide for details.',
+          DeprecationWarning,
+          stacklevel=2,
+      )
+
     if isinstance(self.global_instruction, str):
       return self.global_instruction, False
     else:
@@ -447,8 +515,16 @@ class LlmAgent(BaseAgent):
     This method is only for use by Agent Development Kit.
     """
     resolved_tools = []
+    # We may need to wrap some built-in tools if there are other tools
+    # because the built-in tools cannot be used together with other tools.
+    # TODO(b/448114567): Remove once the workaround is no longer needed.
+    multiple_tools = len(self.tools) > 1
     for tool_union in self.tools:
-      resolved_tools.extend(await _convert_tool_union_to_tools(tool_union, ctx))
+      resolved_tools.extend(
+          await _convert_tool_union_to_tools(
+              tool_union, ctx, self.model, multiple_tools
+          )
+      )
     return resolved_tools
 
   @property
